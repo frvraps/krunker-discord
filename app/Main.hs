@@ -3,10 +3,11 @@
 
 module Main where
 
-import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent (threadDelay)
+import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, readTVar, readTVarIO, writeTVar)
 import Control.Exception (Exception, SomeException, catch, throwIO)
-import Control.Monad (forever, guard, unless, void)
+import Control.Monad (forever, guard, unless)
 import Data.Aeson (FromJSON (parseJSON), Result (..), Value, camelTo2, eitherDecode, encode, fromJSON, genericParseJSON, object, (.=))
 import Data.Aeson.Types (Options (..), ToJSON (..), defaultOptions)
 import Data.Maybe (isJust)
@@ -309,29 +310,33 @@ connectAndRun dToken state maybeResumeUrl = do
       putStrLn "Attempting reconnection..."
       connectAndRun dToken state resumeUrl
 
+expectHello :: Connection -> IO HelloData
+expectHello conn = do
+  hello <- receiveIncoming conn
+  case hello of
+    Left err -> fail $ "Failed to decode message: " <> err
+    Right incoming ->
+      maybe (fail "Expected HELLO") pure (getHelloData incoming)
+
+authenticate :: Connection -> Text -> BotState -> Bool -> IO ()
+authenticate conn dToken state shouldResume
+  | shouldResume = putStrLn "Sending RESUME" >> sendResume conn dToken state
+  | otherwise = putStrLn "Sending IDENTIFY" >> sendIdentify conn dToken
+
+heartbeatLoop :: Connection -> BotState -> Int -> IO ()
+heartbeatLoop conn state interval = forever $ do
+  threadDelay (interval * 1000)
+  sendHeartbeat conn state
+
 ws :: Text -> BotState -> Bool -> ClientApp ()
 ws dToken state shouldResume connection = do
   putStrLn "Connected"
   atomically $ do
     writeTVar (stateRetryCount state) 0
     writeTVar (stateHeartbeatAck state) True
-  hello <- receiveIncoming connection
-  case hello of
-    Left err -> putStrLn $ "Failed to decode message: " <> err
-    Right incoming ->
-      case getHelloData incoming of
-        Nothing -> putStrLn "Expected HELLO"
-        Just helloData -> do
-          let interval = heartbeatInterval helloData
-          putStrLn $ "Heartbeat interval: " <> show interval
-          if shouldResume
-            then do
-              putStrLn "Sending RESUME"
-              sendResume connection dToken state
-            else do
-              putStrLn "Sending IDENTIFY"
-              sendIdentify connection dToken
-          void $ forkIO $ forever $ do
-            threadDelay (interval * 1000)
-            sendHeartbeat connection state
-          eventLoop connection state
+  helloData <- expectHello connection
+  let interval = heartbeatInterval helloData
+  putStrLn $ "Heartbeat interval: " <> show interval
+  authenticate connection dToken state shouldResume
+  withAsync (heartbeatLoop connection state interval) $ \_ ->
+    eventLoop connection state
