@@ -1,4 +1,4 @@
-cabal-version:      3.14
+cabal-version:      3.0
 name:               krunker-discord
 version:            0.1.0.0
 -- synopsis:
@@ -22,6 +22,14 @@ executable krunker-discord
     main-is:          Main.hs
     -- other-modules:
     -- other-extensions:
-    build-depends:    base ^>=4.18.3.0
+    build-depends:    base
+                    , wuss
+                    , websockets
+                    , aeson
+                    , text
+                    , bytestring
+                    , http-client
+                    , http-client-tls
+                    , stm
     hs-source-dirs:   app
-    default-language: GHC2024
+    default-language: Haskell2010
