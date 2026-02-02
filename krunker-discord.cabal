@@ -20,8 +20,9 @@ common warnings
 executable krunker-discord
     import:           warnings
     main-is:          Main.hs
-    -- other-modules:
-    -- other-extensions:
+    other-modules:    Discord.Types
+                    , Discord.State
+                    , Discord.Gateway
     build-depends:    base
                     , wuss
                     , websockets
@@ -32,5 +33,5 @@ executable krunker-discord
                     , http-client-tls
                     , stm
                     , async
-    hs-source-dirs:   app
+    hs-source-dirs:   src
     default-language: Haskell2010
