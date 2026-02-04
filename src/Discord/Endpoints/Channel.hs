@@ -2,13 +2,13 @@
 
 module Discord.Endpoints.Channel where
 
-import Data.Aeson (object, (.=))
 import Data.Text (Text)
 import Discord.Api
 import Discord.Client
+import Discord.Message
 
-sendMessage :: Client -> Text -> Text -> IO (Either ApiError ())
-sendMessage client channelId content = do
+sendMessage :: Client -> Text -> MessageBuilder -> IO (Either ApiError ())
+sendMessage client channelId builder = do
   res <- makePostRequest client ("/channels/" <> channelId <> "/messages") $
-    object ["content" .= content]
+    buildMessage builder
   pure $ res >> Right ()
