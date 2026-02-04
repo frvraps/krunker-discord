@@ -4,51 +4,58 @@ A Discord bot for Krunker stats, built in Haskell.
 
 ## Contributing
 
-See the [Krunker FRVR Code Contribution Document](https://www.notion.so/frvr/Krunker-FRVR-Code-Contribution-Document-aeee93064720475abd4e32cad8a1c5b0) for contribution guidelines.
+See the [FRVR Code Contribution Document](https://www.notion.so/frvr/Krunker-FRVR-Code-Contribution-Document-aeee93064720475abd4e32cad8a1c5b0) for contribution guidelines.
 
 ## Architecture
 
+The bot uses two separate connections to Discord:
+
+1. **Gateway (WebSocket)** - Receives real-time events (messages, reactions, etc.)
+2. **REST API (HTTP)** - Sends messages, edits, and other actions
+
 ```
-src/
-├── Main.hs                      # Entry point and event handling
-├── Discord/
-│   ├── Client.hs                # HTTP client for REST API
-│   ├── Api.hs                   # Base request helpers
-│   ├── Gateway.hs               # WebSocket connection to Discord
-│   ├── State.hs                 # Bot state (session, heartbeat)
-│   ├── Types.hs                 # Gateway types and events
-│   ├── Message.hs               # Message builder DSL
-│   └── Endpoints/
-│       └── Channel.hs           # Channel API endpoints
+┌─────────────────────────────────────────────────────────────┐
+│                         Main.hs                             │
+│                    (Event Handler)                          │
+└─────────────────┬───────────────────────────┬───────────────┘
+                  │                           │
+                  ▼                           ▼
+┌─────────────────────────────┐   ┌───────────────────────────┐
+│     Gateway (WebSocket)     │   │      REST API (HTTP)      │
+│                             │   │                           │
+│  • Connects to Discord      │   │  • Client holds manager   │
+│  • Receives HELLO           │   │    and token              │
+│  • Sends IDENTIFY           │   │  • Endpoints make requests│
+│  • Heartbeats every ~41s    │   │  • Message builder creates│
+│  • Parses events into types │   │    JSON payloads          │
+│  • Handles reconnection     │   │                           │
+└─────────────────────────────┘   └───────────────────────────┘
 ```
 
-### Gateway
+### Gateway Connection Flow
 
-The gateway handles the WebSocket connection to Discord. It manages:
+1. Connect to `wss://gateway.discord.gg`
+2. Receive `HELLO` with heartbeat interval
+3. Send `IDENTIFY` with bot token
+4. Receive `READY` with session info
+5. Start heartbeat loop (runs in separate thread via `withAsync`)
+6. Enter event loop, dispatch events to handler
 
-- Connection and reconnection with exponential backoff
-- Heartbeating to keep the connection alive
-- Session resumption after disconnects
-- Dispatching events to your handler
+On disconnect, the gateway attempts reconnection with exponential backoff. If a session ID exists, it sends `RESUME` instead of `IDENTIFY` to replay missed events.
 
-```haskell
-main = do
-  token <- T.pack <$> getEnv "DISCORD_TOKEN"
-  client <- newClient token
-  state <- newBotState
-  connectAndRun token state (handleEvent client)
+### State Management
 
-handleEvent :: Client -> Event -> IO ()
-handleEvent client event = case event of
-  ReadyEvent {} -> putStrLn "Ready!"
-  MessageCreateEvent {msgContent, msgChannelId} -> do
-    Channel.sendMessage client msgChannelId $ content "Hello!"
-  UnknownEvent name _ -> putStrLn $ "Unknown: " <> T.unpack name
-```
+`BotState` uses `TVar` for thread-safe concurrent access:
+
+- `stateSeqNum` - Sequence number for heartbeats and resume
+- `stateSessionId` - Session ID for resuming
+- `stateResumeUrl` - Gateway URL for resuming
+- `stateHeartbeatAck` - Tracks if last heartbeat was acknowledged
+- `stateRetryCount` - For exponential backoff
 
 ### Events
 
-Events are typed as a sum type:
+Events are parsed from raw JSON into a typed sum type:
 
 ```haskell
 data Event
