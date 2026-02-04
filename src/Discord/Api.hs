@@ -58,3 +58,20 @@ getAndDecode client path = do
   res <- makeGetRequest client path
   pure $ res >>= \body ->
     maybe (Left $ ApiError status400 "Failed to decode") Right (decode body)
+
+makePutRequest :: ToJSON a => Client -> Text -> a -> IO (Either ApiError LBS.ByteString)
+makePutRequest client path body = do
+  initRequest <- parseRequest $ unpack $ clientBaseUrl client <> path
+  let request =
+        initRequest
+          { method = "PUT",
+            requestHeaders =
+              [ ("Authorization", "Bot " <> encodeUtf8 (clientToken client)),
+                ("Content-Type", "application/json")
+              ],
+            requestBody = RequestBodyLBS $ encode body
+          }
+  response <- httpLbs request $ clientManager client
+  if statusIsSuccessful $ responseStatus response
+    then pure $ Right $ responseBody response
+    else pure $ Left $ ApiError (responseStatus response) (responseBody response)

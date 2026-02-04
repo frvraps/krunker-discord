@@ -10,8 +10,8 @@ See the [FRVR Code Contribution Document](https://www.notion.so/frvr/Krunker-FRV
 
 The bot uses two separate connections to Discord:
 
-1. **Gateway (WebSocket)** - Receives real-time events (messages, reactions, etc.)
-2. **REST API (HTTP)** - Sends messages, edits, and other actions
+1. **Gateway (WebSocket)** - Receives real-time events (interactions, messages, etc.)
+2. **REST API (HTTP)** - Registers commands, sends responses
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -23,11 +23,11 @@ The bot uses two separate connections to Discord:
 ┌─────────────────────────────┐   ┌───────────────────────────┐
 │     Gateway (WebSocket)     │   │      REST API (HTTP)      │
 │                             │   │                           │
-│  • Connects to Discord      │   │  • Client holds manager   │
-│  • Receives HELLO           │   │    and token              │
-│  • Sends IDENTIFY           │   │  • Endpoints make requests│
-│  • Heartbeats every ~41s    │   │  • Message builder creates│
-│  • Parses events into types │   │    JSON payloads          │
+│  • Connects to Discord      │   │  • Registers slash cmds   │
+│  • Receives HELLO           │   │  • Responds to interactions│
+│  • Sends IDENTIFY           │   │  • Message builder creates │
+│  • Heartbeats every ~41s    │   │    JSON payloads          │
+│  • Receives interactions    │   │                           │
 │  • Handles reconnection     │   │                           │
 └─────────────────────────────┘   └───────────────────────────┘
 ```
@@ -43,16 +43,6 @@ The bot uses two separate connections to Discord:
 
 On disconnect, the gateway attempts reconnection with exponential backoff. If a session ID exists, it sends `RESUME` instead of `IDENTIFY` to replay missed events.
 
-### State Management
-
-`BotState` uses `TVar` for thread-safe concurrent access:
-
-- `stateSeqNum` - Sequence number for heartbeats and resume
-- `stateSessionId` - Session ID for resuming
-- `stateResumeUrl` - Gateway URL for resuming
-- `stateHeartbeatAck` - Tracks if last heartbeat was acknowledged
-- `stateRetryCount` - For exponential backoff
-
 ### Events
 
 Events are parsed from raw JSON into a typed sum type:
@@ -61,130 +51,119 @@ Events are parsed from raw JSON into a typed sum type:
 data Event
   = ReadyEvent { readySessionId, readyResumeGatewayUrl }
   | MessageCreateEvent { msgId, msgChannelId, msgGuildId, msgContent, msgAuthor }
+  | InteractionCreateEvent Interaction
   | UnknownEvent Text Value
+
+data InteractionData
+  = SlashCommandData { commandName, commandOptions }
+  | ComponentData { componentCustomId, componentType }
 ```
 
-### REST API
+## Slash Commands
 
-The API follows the same pattern as `krunker-hs`:
+### Registering Commands
+
+Commands are registered via the REST API on startup. Use guild commands for development (instant updates) and global commands for production (up to 1 hour to propagate).
 
 ```haskell
--- Create a client once
-client <- newClient token
+-- Register guild commands (instant)
+Command.registerGuildCommands client appId guildId
+  [ Command.SlashCommand "ping" "Check if the bot is alive" [],
+    Command.SlashCommand "player" "Look up a Krunker player"
+      [ Command.CommandOption "name" "Player name" Command.StringOption True
+      ]
+  ]
 
--- Make requests
-result <- Channel.sendMessage client channelId messageBuilder
-case result of
-  Left err -> print err
-  Right () -> pure ()
+-- Register global commands (up to 1 hour delay)
+Command.registerGlobalCommands client appId [...]
+```
+
+### Command Options
+
+```haskell
+data OptionType
+  = StringOption   -- Text input
+  | IntegerOption  -- Whole numbers
+  | BooleanOption  -- True/False
+  | UserOption     -- User mention
+  | ChannelOption  -- Channel mention
+  | RoleOption     -- Role mention
+```
+
+### Handling Commands
+
+Interactions arrive via the gateway as `InteractionCreateEvent`:
+
+```haskell
+handleEvent client event = case event of
+  InteractionCreateEvent interaction ->
+    case interactionData interaction of
+      Just (SlashCommandData name opts) ->
+        handleSlashCommand client interaction name opts
+      Just (ComponentData customId _) ->
+        -- Handle button/select interactions
+      Nothing -> pure ()
+  _ -> pure ()
+
+handleSlashCommand client interaction "ping" _ = do
+  Interaction.respond client (interactionId interaction) (interactionToken interaction) $ do
+    content "Pong! 🏓"
+
+handleSlashCommand client interaction "player" opts = do
+  let playerName = case lookup "name" opts of
+        Just (StringValue n) -> n
+        _ -> "Unknown"
+  Interaction.respond client (interactionId interaction) (interactionToken interaction) $ do
+    embed $ do
+      embedTitle $ "Player: " <> playerName
+      embedColor 0xF5A623
 ```
 
 ## Message Builder
 
 Messages are constructed using a Writer monad DSL.
 
-### Basic Message
-
-```haskell
-Channel.sendMessage client channelId $ do
-  content "Hello, world!"
-```
-
 ### Embeds
 
 ```haskell
-Channel.sendMessage client channelId $ do
-  content "Check this out:"
-  embed $ do
-    embedTitle "My Embed"
-    embedDescription "A description here"
-    embedColor 0x5865F2  -- Discord blurple
-    embedField "Field 1" "Value 1" True   -- inline
-    embedField "Field 2" "Value 2" True   -- inline
-    embedField "Field 3" "Value 3" False  -- not inline
-    embedFooter "Footer text" (Just "https://example.com/icon.png")
-    embedImage "https://example.com/image.png"
-    embedThumbnail "https://example.com/thumb.png"
-    embedAuthor "Author Name" (Just "https://example.com/avatar.png") (Just "https://example.com")
+embed $ do
+  embedTitle "My Embed"
+  embedDescription "A description here"
+  embedColor 0x5865F2
+  embedField "Field 1" "Value 1" True
+  embedField "Field 2" "Value 2" True
+  embedFooter "Footer text" Nothing
+  embedImage "https://example.com/image.png"
+  embedThumbnail "https://example.com/thumb.png"
 ```
 
 ### Buttons
 
-Buttons must be inside an action row. Max 5 buttons per row, max 5 rows per message.
-
 ```haskell
-Channel.sendMessage client channelId $ do
-  content "Click a button:"
-  actionRow $ do
-    button Primary "Primary" "btn_primary"
-    button Secondary "Secondary" "btn_secondary"
-    button Success "Success" "btn_success"
-    button Danger "Danger" "btn_danger"
-  actionRow $ do
-    linkButton "Visit Website" "https://example.com"
+actionRow $ do
+  button Primary "Click Me" "btn_click"
+  button Secondary "Cancel" "btn_cancel"
+  button Success "Confirm" "btn_confirm"
+  button Danger "Delete" "btn_delete"
+  linkButton "Website" "https://example.com"
 ```
-
-Button styles:
-- `Primary` - Blurple
-- `Secondary` - Gray
-- `Success` - Green
-- `Danger` - Red
-
-Link buttons navigate to a URL and don't send an interaction.
 
 ### Select Menus
 
-Select menus take up an entire action row.
-
 ```haskell
-Channel.sendMessage client channelId $ do
-  content "Choose an option:"
-  actionRow $ do
-    stringSelect "my_select" $ do
-      selectPlaceholder "Select an option..."
-      selectMinValues 1
-      selectMaxValues 1
-      selectOption "Option A" "a" $ do
-        selectOptionDescription "This is option A"
-        selectOptionEmoji "🅰️"
-      selectOption "Option B" "b" $ do
-        selectOptionDescription "This is option B"
-        selectOptionEmoji "🅱️"
-        selectOptionDefault  -- pre-selected
-      selectOption "Option C" "c" $ pure ()
-```
-
-### Complete Example
-
-```haskell
-Channel.sendMessage client channelId $ do
-  content "Welcome to the server!"
-
-  embed $ do
-    embedTitle "Getting Started"
-    embedDescription "Here's how to use the bot:"
-    embedColor 0x00FF00
-    embedField "Commands" "`/stats` - View your stats" False
-    embedField "Support" "Click the button below" False
-    embedFooter "Krunker Discord Bot" Nothing
-
-  actionRow $ do
-    button Primary "View Stats" "view_stats"
-    button Secondary "Settings" "settings"
-    linkButton "Documentation" "https://docs.example.com"
-
-  actionRow $ do
-    stringSelect "quick_actions" $ do
-      selectPlaceholder "Quick actions..."
-      selectOption "Check rank" "rank" $ selectOptionEmoji "🏆"
-      selectOption "View matches" "matches" $ selectOptionEmoji "🎮"
-      selectOption "Get help" "help" $ selectOptionEmoji "❓"
+actionRow $ do
+  stringSelect "my_select" $ do
+    selectPlaceholder "Choose..."
+    selectOption "Option A" "a" $ selectOptionDescription "First option"
+    selectOption "Option B" "b" $ selectOptionDefault
 ```
 
 ## Running
 
 ```bash
 export DISCORD_TOKEN="your-bot-token"
+export DISCORD_APP_ID="your-application-id"
+export DISCORD_GUILD_ID="your-test-guild-id"
 cabal run
 ```
 

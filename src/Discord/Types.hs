@@ -15,6 +15,7 @@ module Discord.Types
     Interaction (..),
     InteractionData (..),
     InteractionType (..),
+    CommandOptionValue (..),
     parseEvent,
     opcodeDispatch,
     opcodeHeartbeat,
@@ -28,8 +29,10 @@ module Discord.Types
 where
 
 import Control.Exception (Exception)
-import Data.Aeson (FromJSON (parseJSON), Value (..), camelTo2, genericParseJSON, object, (.=), (.:), (.:?))
+import Data.Aeson (FromJSON (parseJSON), Value (..), camelTo2, genericParseJSON, object, (.:), (.:?), (.=))
 import Data.Aeson.Types (Options (..), ToJSON (..), defaultOptions, parseMaybe)
+import Data.Foldable (toList)
+import Data.Maybe (mapMaybe)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -140,14 +143,29 @@ data Event
   deriving (Show)
 
 data InteractionType
-  = ComponentInteraction
+  = ApplicationCommand
+  | ComponentInteraction
   | OtherInteraction Int
+  deriving (Show, Eq)
+
+data CommandOptionValue
+  = StringValue Text
+  | IntValue Int
+  | BoolValue Bool
+  | UserValue Text
+  | ChannelValue Text
+  | RoleValue Text
   deriving (Show)
 
-data InteractionData = InteractionData
-  { interactionCustomId :: Text,
-    interactionComponentType :: Int
-  }
+data InteractionData
+  = SlashCommandData
+      { commandName :: Text,
+        commandOptions :: [(Text, CommandOptionValue)]
+      }
+  | ComponentData
+      { componentCustomId :: Text,
+        componentType :: Int
+      }
   deriving (Show)
 
 data Interaction = Interaction
@@ -155,6 +173,7 @@ data Interaction = Interaction
     interactionToken :: Text,
     interactionType :: InteractionType,
     interactionChannelId :: Text,
+    interactionGuildId :: Maybe Text,
     interactionData :: Maybe InteractionData,
     interactionMessage :: Maybe Value
   }
@@ -191,22 +210,52 @@ parseEvent "INTERACTION_CREATE" (Object o) =
       iToken <- obj .: "token"
       iType <- obj .: "type"
       iChannelId <- obj .: "channel_id"
+      iGuildId <- obj .:? "guild_id"
       iData <- obj .:? "data"
       iMessage <- obj .:? "message"
-      parsedData <- case iData of
-        Just (Object dataObj) -> do
+      let interType = case (iType :: Int) of
+            2 -> ApplicationCommand
+            3 -> ComponentInteraction
+            n -> OtherInteraction n
+      parsedData <- case (iType :: Int, iData) of
+        (2, Just (Object dataObj)) -> do
+          name <- dataObj .: "name"
+          opts <- dataObj .:? "options"
+          let parsedOpts = case opts of
+                Just (Array arr) -> parseOptions (toList arr)
+                _ -> []
+          pure $ Just $ SlashCommandData name parsedOpts
+        (3, Just (Object dataObj)) -> do
           customId <- dataObj .: "custom_id"
           compType <- dataObj .: "component_type"
-          pure $ Just $ InteractionData customId compType
+          pure $ Just $ ComponentData customId compType
         _ -> pure Nothing
       pure $
         Interaction
           iId
           iToken
-          (if iType == (3 :: Int) then ComponentInteraction else OtherInteraction iType)
+          interType
           iChannelId
+          iGuildId
           parsedData
           iMessage
+
+    parseOptions :: [Value] -> [(Text, CommandOptionValue)]
+    parseOptions = mapMaybe parseOpt
+      where
+        parseOpt (Object optObj) = do
+          optName <- parseMaybe (.: "name") optObj
+          optType <- parseMaybe (.: "type") optObj
+          val <- case (optType :: Int) of
+            3 -> StringValue <$> parseMaybe (.: "value") optObj
+            4 -> IntValue <$> parseMaybe (.: "value") optObj
+            5 -> BoolValue <$> parseMaybe (.: "value") optObj
+            6 -> UserValue <$> parseMaybe (.: "value") optObj
+            7 -> ChannelValue <$> parseMaybe (.: "value") optObj
+            8 -> RoleValue <$> parseMaybe (.: "value") optObj
+            _ -> StringValue <$> parseMaybe (.: "value") optObj
+          pure (optName, val)
+        parseOpt _ = Nothing
 parseEvent "INTERACTION_CREATE" val = UnknownEvent "INTERACTION_CREATE" val
 parseEvent name val = UnknownEvent name val
 

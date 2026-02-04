@@ -27,6 +27,8 @@ executable krunker-discord
                     , Discord.Api
                     , Discord.Message
                     , Discord.Endpoints.Channel
+                    , Discord.Endpoints.Interaction
+                    , Discord.Endpoints.Command
     build-depends:    base
                     , wuss
                     , websockets
