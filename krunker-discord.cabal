@@ -23,6 +23,9 @@ executable krunker-discord
     other-modules:    Discord.Types
                     , Discord.State
                     , Discord.Gateway
+                    , Discord.Client
+                    , Discord.Api
+                    , Discord.Endpoints.Channel
     build-depends:    base
                     , wuss
                     , websockets
@@ -31,6 +34,7 @@ executable krunker-discord
                     , bytestring
                     , http-client
                     , http-client-tls
+                    , http-types
                     , stm
                     , async
                     , krunker-hs
