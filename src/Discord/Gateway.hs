@@ -33,31 +33,31 @@ connectAndRun dToken state handler = go Nothing
               ("gateway.discord.gg", "/?v=10&encoding=json")
               parseResumeUrl
               maybeResumeUrl
-      putStrLn $ "Connecting to " <> host
+      putStrLn $ "Gateway: Connecting to " <> host
       catch
         (runSecureClient host 443 path $ ws dToken state handler (isJust maybeResumeUrl))
         (handleDisconnect go)
 
     handleDisconnect reconnect e = do
-      putStrLn $ "Disconnected: " <> show (e :: SomeException)
+      putStrLn $ "Gateway: Disconnected: " <> show (e :: SomeException)
       retryCount <- readTVarIO $ stateRetryCount state
       let delay = min 60 (2 ^ retryCount) * 1000000
-      putStrLn $ "Waiting " <> show (delay `div` 1000000) <> "s before reconnecting..."
+      putStrLn $ "Gateway: Waiting " <> show (delay `div` 1000000) <> "s before reconnecting..."
       atomically $ writeTVar (stateRetryCount state) (retryCount + 1)
       threadDelay delay
       resumeUrl <- readTVarIO $ stateResumeUrl state
-      putStrLn "Attempting reconnection..."
+      putStrLn "Gateway: Attempting reconnection..."
       reconnect resumeUrl
 
 ws :: Text -> BotState -> EventHandler -> Bool -> ClientApp ()
 ws dToken state handler shouldResume connection = do
-  putStrLn "Connected"
+  putStrLn "Gateway: Connected"
   atomically $ do
     writeTVar (stateRetryCount state) 0
     writeTVar (stateHeartbeatAck state) True
   helloData <- expectHello connection
   let interval = heartbeatInterval helloData
-  putStrLn $ "Heartbeat interval: " <> show interval
+  putStrLn $ "Gateway: Heartbeat interval: " <> show interval
   authenticate connection dToken state shouldResume
   withAsync (heartbeatLoop connection state interval) $ \_ ->
     eventLoop connection state handler
@@ -72,8 +72,8 @@ expectHello conn = do
 
 authenticate :: Connection -> Text -> BotState -> Bool -> IO ()
 authenticate conn dToken state shouldResume
-  | shouldResume = putStrLn "Sending RESUME" >> sendResume conn dToken state
-  | otherwise = putStrLn "Sending IDENTIFY" >> sendIdentify conn dToken
+  | shouldResume = putStrLn "Gateway: Sending RESUME" >> sendResume conn dToken state
+  | otherwise = putStrLn "Gateway: Sending IDENTIFY" >> sendIdentify conn dToken
 
 heartbeatLoop :: Connection -> BotState -> Int -> IO ()
 heartbeatLoop conn state interval = forever $ do
@@ -84,7 +84,7 @@ eventLoop :: Connection -> BotState -> EventHandler -> IO ()
 eventLoop conn state handler = forever $ do
   event <- receiveIncoming conn
   case event of
-    Left err -> putStrLn $ "Failed to decode message: " <> err
+    Left err -> putStrLn $ "Gateway: Failed to decode message: " <> err
     Right incoming -> do
       updateSeqNum state incoming
       handleGatewayEvent conn state incoming
@@ -99,18 +99,18 @@ updateSeqNum state incoming =
 handleGatewayEvent :: Connection -> BotState -> Incoming -> IO ()
 handleGatewayEvent conn state incoming
   | Just (sessId, resumeUrl) <- getReadyData incoming = do
-      putStrLn $ "Got READY, session: " <> show sessId
+      putStrLn $ "Gateway: Got READY, session: " <> show sessId
       storeSessionInfo state sessId resumeUrl
   | Just canResume <- isInvalidSession incoming = do
-      putStrLn $ "Invalid session, can resume: " <> show canResume
+      putStrLn $ "Gateway: Invalid session, can resume: " <> show canResume
       unless canResume $ clearSessionState state
   | op incoming == opcodeHeartbeatAck =
       atomically $ writeTVar (stateHeartbeatAck state) True
   | op incoming == opcodeReconnect = do
-      putStrLn "Reconnect requested by Discord"
+      putStrLn "Gateway: Reconnect requested by Discord"
       throwIO ReconnectRequested
   | op incoming == opcodeHeartbeat = do
-      putStrLn "Heartbeat requested by Discord"
+      putStrLn "Gateway: Heartbeat requested by Discord"
       seqNum <- readTVarIO $ stateSeqNum state
       sendTextData conn $ encode $ Outgoing opcodeHeartbeat (HeartbeatData seqNum)
   | otherwise = pure ()
@@ -157,7 +157,7 @@ sendResume conn dToken state = do
   sessId <- readTVarIO $ stateSessionId state
   seqNum <- readTVarIO $ stateSeqNum state
   case sessId of
-    Nothing -> putStrLn "No session ID to resume"
+    Nothing -> putStrLn "Gateway: No session ID to resume"
     Just sid ->
       sendTextData conn $ encode $ Outgoing opcodeResume (ResumeData dToken sid seqNum)
 
