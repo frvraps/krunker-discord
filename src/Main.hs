@@ -3,6 +3,7 @@
 module Main where
 
 import Control.Concurrent (forkIO)
+import Control.Monad (void)
 import qualified Data.Text as T
 import Discord.Client (Client, newClient)
 import qualified Discord.Endpoints.Command as Command
@@ -43,42 +44,37 @@ main = do
   connectAndRun discordToken state (handleEvent client)
 
 handleEvent :: Client -> EventHandler
-handleEvent client event = do
-  _ <- forkIO $ case event of
-    ReadyEvent {} -> putStrLn "Ready!"
-    InteractionCreateEvent interaction ->
-      case interactionData interaction of
-        Just (SlashCommandData name opts) -> do
-          putStrLn $ "Slash command: " <> T.unpack name
-          handleSlashCommand client interaction name opts
-        Just (ComponentData customId _) -> do
-          putStrLn $ "Component: " <> T.unpack customId
-          -- Handle button/select interactions here
-          _ <- Interaction.acknowledge client (interactionId interaction) (interactionToken interaction)
-          pure ()
-        Nothing -> pure ()
-    _ -> pure ()
-
-  pure ()
+handleEvent client event = void $ forkIO $ case event of
+  ReadyEvent {} -> putStrLn "Ready!"
+  InteractionCreateEvent interaction ->
+    case interactionData interaction of
+      Just (SlashCommandData name opts) -> do
+        putStrLn $ "Slash command: " <> T.unpack name
+        handleSlashCommand client interaction name opts
+      Just (ComponentData customId _) -> do
+        putStrLn $ "Component: " <> T.unpack customId
+        void $ Interaction.acknowledge client (interactionId interaction) (interactionToken interaction)
+      Nothing -> pure ()
+  _ -> pure ()
 
 handleSlashCommand :: Client -> Interaction -> T.Text -> [(T.Text, CommandOptionValue)] -> IO ()
-handleSlashCommand client interaction "ping" _ = do
-  _ <- Interaction.respond client (interactionId interaction) (interactionToken interaction) $ do
-    content "Pong! 🏓"
-  pure ()
+handleSlashCommand client interaction "ping" _ =
+  void $
+    Interaction.respond client (interactionId interaction) (interactionToken interaction) $
+      content "Pong! 🏓"
 handleSlashCommand client interaction "player" opts = do
   let playerName = case lookup "name" opts of
         Just (StringValue n) -> n
         _ -> "Unknown"
-  _ <- Interaction.respond client (interactionId interaction) (interactionToken interaction) $ do
+  void $ Interaction.respond client (interactionId interaction) (interactionToken interaction) $ do
     embed $ do
       embedTitle $ "Player: " <> playerName
       embedDescription "Player lookup coming soon..."
       embedColor 0xF5A623
-    actionRow $ do
+    actionRow $
       linkButton "View Profile" ("https://krunker.io/social.html?p=profile&q=" <> playerName)
-  pure ()
-handleSlashCommand client interaction cmd _ = do
-  _ <- Interaction.respond client (interactionId interaction) (interactionToken interaction) $ do
-    content $ "Unknown command: " <> cmd
-  pure ()
+handleSlashCommand client interaction cmd _ =
+  void $
+    Interaction.respond client (interactionId interaction) (interactionToken interaction) $
+      content $
+        "Unknown command: " <> cmd

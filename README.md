@@ -95,25 +95,25 @@ data OptionType
 Interactions arrive via the gateway as `InteractionCreateEvent`:
 
 ```haskell
-handleEvent client event = case event of
+handleEvent client event = void $ forkIO $ case event of
   InteractionCreateEvent interaction ->
     case interactionData interaction of
       Just (SlashCommandData name opts) ->
         handleSlashCommand client interaction name opts
       Just (ComponentData customId _) ->
-        -- Handle button/select interactions
+        void $ Interaction.acknowledge client (interactionId interaction) (interactionToken interaction)
       Nothing -> pure ()
   _ -> pure ()
 
-handleSlashCommand client interaction "ping" _ = do
-  Interaction.respond client (interactionId interaction) (interactionToken interaction) $ do
+handleSlashCommand client interaction "ping" _ =
+  void $ Interaction.respond client (interactionId interaction) (interactionToken interaction) $
     content "Pong! 🏓"
 
 handleSlashCommand client interaction "player" opts = do
   let playerName = case lookup "name" opts of
         Just (StringValue n) -> n
         _ -> "Unknown"
-  Interaction.respond client (interactionId interaction) (interactionToken interaction) $ do
+  void $ Interaction.respond client (interactionId interaction) (interactionToken interaction) $ do
     embed $ do
       embedTitle $ "Player: " <> playerName
       embedColor 0xF5A623

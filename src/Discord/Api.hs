@@ -16,7 +16,7 @@ data ApiError = ApiError
   }
   deriving (Show)
 
-makePostRequest :: ToJSON a => Client -> Text -> a -> IO (Either ApiError LBS.ByteString)
+makePostRequest :: (ToJSON a) => Client -> Text -> a -> IO (Either ApiError LBS.ByteString)
 makePostRequest client path body = do
   initRequest <- parseRequest $ unpack $ clientBaseUrl client <> path
   let request =
@@ -36,8 +36,9 @@ makePostRequest client path body = do
 postAndDecode :: (ToJSON a, FromJSON b) => Client -> Text -> a -> IO (Either ApiError b)
 postAndDecode client path body = do
   res <- makePostRequest client path body
-  pure $ res >>= \respBody ->
-    maybe (Left $ ApiError status400 "Failed to decode") Right (decode respBody)
+  pure $
+    res >>= \respBody ->
+      maybe (Left $ ApiError status400 "Failed to decode") Right (decode respBody)
 
 makeGetRequest :: Client -> Text -> IO (Either ApiError LBS.ByteString)
 makeGetRequest client path = do
@@ -53,13 +54,14 @@ makeGetRequest client path = do
     then pure $ Right $ responseBody response
     else pure $ Left $ ApiError (responseStatus response) (responseBody response)
 
-getAndDecode :: FromJSON a => Client -> Text -> IO (Either ApiError a)
+getAndDecode :: (FromJSON a) => Client -> Text -> IO (Either ApiError a)
 getAndDecode client path = do
   res <- makeGetRequest client path
-  pure $ res >>= \body ->
-    maybe (Left $ ApiError status400 "Failed to decode") Right (decode body)
+  pure $
+    res >>= \body ->
+      maybe (Left $ ApiError status400 "Failed to decode") Right (decode body)
 
-makePutRequest :: ToJSON a => Client -> Text -> a -> IO (Either ApiError LBS.ByteString)
+makePutRequest :: (ToJSON a) => Client -> Text -> a -> IO (Either ApiError LBS.ByteString)
 makePutRequest client path body = do
   initRequest <- parseRequest $ unpack $ clientBaseUrl client <> path
   let request =
