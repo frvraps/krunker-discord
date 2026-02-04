@@ -8,9 +8,11 @@ module Discord.Types
     IdentifyProperties (..),
     HelloData (..),
     HeartbeatData (..),
-    ReadyData (..),
     ResumeData (..),
     GatewayException (..),
+    Author (..),
+    Event (..),
+    parseEvent,
     opcodeDispatch,
     opcodeHeartbeat,
     opcodeIdentify,
@@ -23,8 +25,8 @@ module Discord.Types
 where
 
 import Control.Exception (Exception)
-import Data.Aeson (FromJSON (parseJSON), Value, camelTo2, genericParseJSON, object, (.=))
-import Data.Aeson.Types (Options (..), ToJSON (..), defaultOptions)
+import Data.Aeson (FromJSON (parseJSON), Value (..), camelTo2, genericParseJSON, object, (.=), (.:), (.:?))
+import Data.Aeson.Types (Options (..), ToJSON (..), defaultOptions, parseMaybe)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -89,19 +91,6 @@ newtype HeartbeatData = HeartbeatData
 instance ToJSON HeartbeatData where
   toJSON (HeartbeatData seqNum) = toJSON seqNum
 
-data ReadyData = ReadyData
-  { sessionId :: Text,
-    resumeGatewayUrl :: Text
-  }
-  deriving (Show, Generic)
-
-instance FromJSON ReadyData where
-  parseJSON =
-    genericParseJSON
-      defaultOptions
-        { fieldLabelModifier = camelTo2 '_'
-        }
-
 data ResumeData = ResumeData
   { resumeToken :: Text,
     resumeSessionId :: Text,
@@ -116,6 +105,58 @@ instance ToJSON ResumeData where
         "session_id" .= sessId,
         "seq" .= seqNum
       ]
+
+data Author = Author
+  { authorId :: Text,
+    authorUsername :: Text,
+    authorBot :: Maybe Bool
+  }
+  deriving (Show, Generic)
+
+instance FromJSON Author where
+  parseJSON =
+    genericParseJSON
+      defaultOptions
+        { fieldLabelModifier = camelTo2 '_' . drop 6
+        }
+
+data Event
+  = ReadyEvent
+      { readySessionId :: Text,
+        readyResumeGatewayUrl :: Text
+      }
+  | MessageCreateEvent
+      { msgId :: Text,
+        msgChannelId :: Text,
+        msgGuildId :: Maybe Text,
+        msgContent :: Text,
+        msgAuthor :: Author
+      }
+  | UnknownEvent Text Value
+  deriving (Show)
+
+parseEvent :: Text -> Value -> Event
+parseEvent "READY" (Object o) =
+  case parseMaybe parser o of
+    Just event -> event
+    Nothing -> UnknownEvent "READY" (Object o)
+  where
+    parser obj = ReadyEvent <$> obj .: "session_id" <*> obj .: "resume_gateway_url"
+parseEvent "READY" val = UnknownEvent "READY" val
+parseEvent "MESSAGE_CREATE" (Object o) =
+  case parseMaybe parser o of
+    Just event -> event
+    Nothing -> UnknownEvent "MESSAGE_CREATE" (Object o)
+  where
+    parser obj =
+      MessageCreateEvent
+        <$> obj .: "id"
+        <*> obj .: "channel_id"
+        <*> obj .:? "guild_id"
+        <*> obj .: "content"
+        <*> obj .: "author"
+parseEvent "MESSAGE_CREATE" val = UnknownEvent "MESSAGE_CREATE" val
+parseEvent name val = UnknownEvent name val
 
 data GatewayException = ReconnectRequested | ZombieConnection
   deriving (Show)

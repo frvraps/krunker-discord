@@ -8,7 +8,6 @@ where
 
 import Control.Concurrent.STM (TVar, atomically, newTVarIO, writeTVar)
 import Data.Text (Text)
-import Discord.Types (ReadyData (..))
 
 data BotState = BotState
   { stateSeqNum :: TVar (Maybe Int),
@@ -27,10 +26,10 @@ newBotState =
     <*> newTVarIO True
     <*> newTVarIO 0
 
-storeSessionInfo :: BotState -> ReadyData -> IO ()
-storeSessionInfo state ready = atomically $ do
-  writeTVar (stateSessionId state) (Just $ sessionId ready)
-  writeTVar (stateResumeUrl state) (Just $ resumeGatewayUrl ready)
+storeSessionInfo :: BotState -> Text -> Text -> IO ()
+storeSessionInfo state sessId resumeUrl = atomically $ do
+  writeTVar (stateSessionId state) (Just sessId)
+  writeTVar (stateResumeUrl state) (Just resumeUrl)
 
 clearSessionState :: BotState -> IO ()
 clearSessionState state = atomically $ do

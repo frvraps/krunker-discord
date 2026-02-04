@@ -11,7 +11,8 @@ import Control.Concurrent.Async (withAsync)
 import Control.Concurrent.STM (atomically, readTVar, readTVarIO, writeTVar)
 import Control.Exception (SomeException, catch, throwIO)
 import Control.Monad (forever, guard, unless)
-import Data.Aeson (Result (..), Value, eitherDecode, encode, fromJSON)
+import Data.Aeson (Result (..), Value (..), eitherDecode, encode, fromJSON, (.:))
+import Data.Aeson.Types (parseMaybe)
 import Data.Maybe (isJust)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -21,7 +22,7 @@ import Network.WebSockets (ClientApp, Connection, receiveData)
 import Network.WebSockets.Connection (sendTextData)
 import Wuss (runSecureClient)
 
-type EventHandler = Text -> Value -> IO ()
+type EventHandler = Event -> IO ()
 
 connectAndRun :: Text -> BotState -> EventHandler -> IO ()
 connectAndRun dToken state handler = go Nothing
@@ -97,9 +98,9 @@ updateSeqNum state incoming =
 
 handleGatewayEvent :: Connection -> BotState -> Incoming -> IO ()
 handleGatewayEvent conn state incoming
-  | Just ready <- getReadyData incoming = do
-      putStrLn $ "Got READY, session: " <> show (sessionId ready)
-      storeSessionInfo state ready
+  | Just (sessId, resumeUrl) <- getReadyData incoming = do
+      putStrLn $ "Got READY, session: " <> show sessId
+      storeSessionInfo state sessId resumeUrl
   | Just canResume <- isInvalidSession incoming = do
       putStrLn $ "Invalid session, can resume: " <> show canResume
       unless canResume $ clearSessionState state
@@ -119,7 +120,7 @@ handleDispatchEvent handler incoming
   | op incoming == opcodeDispatch,
     Just eventName <- t incoming,
     Just eventData <- d incoming =
-      handler eventName eventData
+      handler (parseEvent eventName eventData)
   | otherwise = pure ()
 
 receiveIncoming :: Connection -> IO (Either String Incoming)
@@ -132,7 +133,7 @@ sendIdentify conn dToken =
       Outgoing opcodeIdentify $
         IdentifyData
           { token = dToken,
-            intents = 513,
+            intents = 33280,
             properties =
               IdentifyProperties
                 { os = "linux",
@@ -168,14 +169,12 @@ getHelloData incoming = do
     Success h -> Just h
     Error _ -> Nothing
 
-getReadyData :: Incoming -> Maybe ReadyData
+getReadyData :: Incoming -> Maybe (Text, Text)
 getReadyData incoming = do
   guard (op incoming == opcodeDispatch)
   guard (t incoming == Just "READY")
-  val <- d incoming
-  case fromJSON val of
-    Success r -> Just r
-    Error _ -> Nothing
+  Object o <- d incoming
+  parseMaybe (\obj -> (,) <$> obj .: "session_id" <*> obj .: "resume_gateway_url") o
 
 isInvalidSession :: Incoming -> Maybe Bool
 isInvalidSession incoming = do
