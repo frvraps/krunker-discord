@@ -36,6 +36,7 @@ module Discord.Message
   )
 where
 
+import Control.Applicative ((<|>))
 import Control.Monad.Writer
 import Data.Aeson (ToJSON (..), object, (.=))
 import Data.Text (Text)
@@ -55,9 +56,6 @@ instance Semigroup MessageData where
         messageEmbeds = messageEmbeds a <> messageEmbeds b,
         messageComponents = messageComponents a <> messageComponents b
       }
-    where
-      (<|>) Nothing y = y
-      (<|>) x _ = x
 
 instance Monoid MessageData where
   mempty = MessageData Nothing [] []
@@ -102,9 +100,6 @@ instance Semigroup EmbedData where
         embedDataThumbnail = embedDataThumbnail b <|> embedDataThumbnail a,
         embedDataAuthor = embedDataAuthor b <|> embedDataAuthor a
       }
-    where
-      (<|>) Nothing y = y
-      (<|>) x _ = x
 
 instance Monoid EmbedData where
   mempty = EmbedData Nothing Nothing Nothing [] Nothing Nothing Nothing Nothing
@@ -298,9 +293,6 @@ instance Semigroup SelectData where
         selectDataMin = selectDataMin b <|> selectDataMin a,
         selectDataMax = selectDataMax b <|> selectDataMax a
       }
-    where
-      (<|>) Nothing y = y
-      (<|>) x _ = x
 
 instance Monoid SelectData where
   mempty = SelectData [] Nothing Nothing Nothing
@@ -337,9 +329,6 @@ instance Semigroup SelectOptionData where
         optionEmoji = optionEmoji b <|> optionEmoji a,
         optionDefault = optionDefault b || optionDefault a
       }
-    where
-      (<|>) Nothing y = y
-      (<|>) x _ = x
 
 instance Monoid SelectOptionData where
   mempty = SelectOptionData "" "" Nothing Nothing False
