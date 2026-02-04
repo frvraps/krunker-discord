@@ -12,6 +12,9 @@ module Discord.Types
     GatewayException (..),
     Author (..),
     Event (..),
+    Interaction (..),
+    InteractionData (..),
+    InteractionType (..),
     parseEvent,
     opcodeDispatch,
     opcodeHeartbeat,
@@ -132,7 +135,29 @@ data Event
         msgContent :: Text,
         msgAuthor :: Author
       }
+  | InteractionCreateEvent Interaction
   | UnknownEvent Text Value
+  deriving (Show)
+
+data InteractionType
+  = ComponentInteraction
+  | OtherInteraction Int
+  deriving (Show)
+
+data InteractionData = InteractionData
+  { interactionCustomId :: Text,
+    interactionComponentType :: Int
+  }
+  deriving (Show)
+
+data Interaction = Interaction
+  { interactionId :: Text,
+    interactionToken :: Text,
+    interactionType :: InteractionType,
+    interactionChannelId :: Text,
+    interactionData :: Maybe InteractionData,
+    interactionMessage :: Maybe Value
+  }
   deriving (Show)
 
 parseEvent :: Text -> Value -> Event
@@ -156,6 +181,33 @@ parseEvent "MESSAGE_CREATE" (Object o) =
         <*> obj .: "content"
         <*> obj .: "author"
 parseEvent "MESSAGE_CREATE" val = UnknownEvent "MESSAGE_CREATE" val
+parseEvent "INTERACTION_CREATE" (Object o) =
+  case parseMaybe parser o of
+    Just event -> InteractionCreateEvent event
+    Nothing -> UnknownEvent "INTERACTION_CREATE" (Object o)
+  where
+    parser obj = do
+      iId <- obj .: "id"
+      iToken <- obj .: "token"
+      iType <- obj .: "type"
+      iChannelId <- obj .: "channel_id"
+      iData <- obj .:? "data"
+      iMessage <- obj .:? "message"
+      parsedData <- case iData of
+        Just (Object dataObj) -> do
+          customId <- dataObj .: "custom_id"
+          compType <- dataObj .: "component_type"
+          pure $ Just $ InteractionData customId compType
+        _ -> pure Nothing
+      pure $
+        Interaction
+          iId
+          iToken
+          (if iType == (3 :: Int) then ComponentInteraction else OtherInteraction iType)
+          iChannelId
+          parsedData
+          iMessage
+parseEvent "INTERACTION_CREATE" val = UnknownEvent "INTERACTION_CREATE" val
 parseEvent name val = UnknownEvent name val
 
 data GatewayException = ReconnectRequested | ZombieConnection
