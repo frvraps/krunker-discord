@@ -4,7 +4,7 @@ A Discord bot for Krunker stats, built in Haskell.
 
 ## Contributing
 
-See the [FRVR Code Contribution Document](https://www.notion.so/frvr/Krunker-FRVR-Code-Contribution-Document-aeee93064720475abd4e32cad8a1c5b0) for contribution guidelines.
+See the [Pull Request and Commit Policies](https://frvr.notion.site/Pull-Request-and-Commit-Policies-606e168fe9e04ab5abe697aabb47ed43?pvs=74) for contribution guidelines.
 
 ## Architecture
 
